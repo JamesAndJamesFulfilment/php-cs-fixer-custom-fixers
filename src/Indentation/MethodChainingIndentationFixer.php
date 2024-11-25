@@ -18,8 +18,6 @@ final class MethodChainingIndentationFixer extends AbstractFixer implements Whit
     private const OPEN_CONDITIONS  = ['andClause', 'orClause'];
     private const CLOSE_CONDITIONS = ['endClause'];
 
-    private $nested_condition_indices = [];
-
     public function getName(): string
     {
         return 'JJCustom/method_chaining_indentation';
@@ -64,8 +62,6 @@ $query
 
     protected function applyFix(\SplFileInfo $file, Tokens $tokens): void
     {
-        $this->gatherNestedConditionIndices($tokens);
-
         $line_ending = $this->whitespacesConfig->getLineEnding();
 
         for ($index = 1, $count = count($tokens); $index < $count; ++$index) {
@@ -298,21 +294,6 @@ $query
         return
             !$tokens[$end]->equals(')')
             || $tokens->findBlockStart(Tokens::BLOCK_TYPE_PARENTHESIS_BRACE, $end) >= $start;
-    }
-
-    private function gatherNestedConditionIndices(Tokens $tokens): array
-    {
-        if (!empty($this->nested_condition_indices)) {
-            return $this->nested_condition_indices;
-        }
-
-        foreach ($tokens as $index => $token) {
-            if ($this->isOpenCondition($token) || $this->isCloseCondition($token)) {
-                $this->nested_condition_indices[$index] = $token->getContent();
-            }
-        }
-
-        return $this->nested_condition_indices;
     }
 
     private function isOpenCondition(Token $token): bool
