@@ -96,69 +96,71 @@ $query
             $expected_indent = $this->getExpectedIndentAt($tokens, $index);
 
             /**
-             * the string content of a single level of indentation, based on the
-             * current file contents
+             * Here begins the custom logic for dealing with nested opening and
+             * closing conditionals.
+             *
+             * Tokens themselves are not grouped into lines of code, and we are
+             * "anchored" to T_OBJECT_OPERATOR ("->") tokens - all other token
+             * types are skipped right at the top of the for loop above. What
+             * that means is we must inspect tokens which are ahead of or
+             * behind the current T_OBJECT_OPERATOR token by known amounts to
+             * have a sense of whether to make changes to the indenting level.
              */
+
+            // the string content of a single level of indentation
             $one_indent = $this->whitespacesConfig->getIndent();
 
             /**
-             * If we know we are dealing with either an opening conditional
-             * (`andClause()` or `orClause()`), or a closing conditional
-             * (`endClause()`), there should be exactly five tokens which make
-             * up one that line of code:
-             *
-             *     - a newline character and at least one character of whitespace
-             *       indent - this equates to `$index - 1`; and
-             *      - the T_OBJECT_OPERATOR itself (`$index`); and
-             *      - the string method name (`$index + 1`); and
-             *      - an opening parenthesis (`$index + 2`); and
-             *      - a closing parenthesis (`$index + 3`).
-             *
-             * As each line of code is processed, the state of the previous line
-             * dictates the starting point for the current line. If we increase
-             * (or decrease) the amount of indent on the current line, that
-             * change will stay in effect for this and all __following__ lines
-             * until something else modifies it again.
-             *
-             * We cannot modify any following or previous lines, but we can look
-             * around at previous and following lines to make decisions about
-             * what to do on the current line. In this case, `$index - 4` should
-             * be the string method name from the __previous__ line.
-             *
-             * If that previous string method name is an opening conditional,
-             * then we know that __this__ line must be modified to have an
-             * additional layer of indenting.
+             * Four tokens ago (`$index - 4`) could be an opening conditional
+             * (`andClause` or `orClause`) on the previous line. If that's the
+             * case then we must increase the indent at __this token__ by
+             * one level.
              */
             if ($this->isOpenCondition($tokens[$index - 4])) {
                 $expected_indent .= $one_indent;
-            } elseif (
+
+            /**
+             * It could also be true that the previous line contained an
+             * opening conditional, but the line ended with a comment instead
+             * of the closing brace. In that situation, the conditional will
+             * be located at `$index - 6` instead, but we still need to increase
+             * the indent level.
+             */
+            } elseif ($this->isOpenCondition($tokens[$index - 6])) {
+                $expected_indent .= $one_indent;
+
+            /**
+             * If this current line is a closing conditional, we __may__
+             * have to reduce the indent of this line by one layer.
+             */
+            } elseif ($this->isCloseCondition($tokens[$index + 1])) {
                 /**
-                 * However, if this current line is a closing conditional, we
-                 * will probably have to reduce the indent of this line by one
-                 * layer. The second test ending `... == T_VARIABLE` in this
-                 * conditional is the one known exception to this need to reduce
-                 * indentation, and is best explained with the single example
-                 * found so far:
+                 * There is one known exception where we can't reduce the indent
+                 * level - if the nested conditional isn't chained in the usual
+                 * manner. For example:
                  *
-                 *      $query = $this
-                 *          ->createQuery('a')
-                 *          ->select('whatever')
-                 *          ->orClause();
+                 *     $query = $this
+                 *         ->createQuery('a')
+                 *         ->select('whatever')
+                 *         ->orClause();
                  *
-                 * <some conditional logic goes here>
+                 *     <some other conditional logic goes here>
                  *
                  *     $query
                  *         ->endClause()
                  *         ->execute();
                  *
-                 * If we don't handle that the preceeding element is the `$query`
-                 * variable, then the `->endClause()` would have its indentation
-                 * reduced incorrectly to be flush with the `$query` indent.
+                 * If two tokens ago (`$index - 2`) is a variable, then we know
+                 * __not__ to reduce the indent level for the current line.
                  */
-                $this->isCloseCondition($tokens[$index + 1])
-                && !(isset($tokens[$index - 2]) && $tokens[$index - 2]->getName() == 'T_VARIABLE')
-            ) {
-                $expected_indent = mb_substr($expected_indent, 0, - (mb_strlen($one_indent)));
+                if (
+                    !(
+                        isset($tokens[$index - 2])
+                        && $this->isVariable($tokens[$index - 2])
+                    )
+                ) {
+                    $expected_indent = mb_substr($expected_indent, 0, - (mb_strlen($one_indent)));
+                }
             }
 
             if ($current_indent !== $expected_indent) {
@@ -304,5 +306,10 @@ $query
     private function isCloseCondition(Token $token): bool
     {
         return $token->getName() == 'T_STRING' && in_array($token->getContent(), self::CLOSE_CONDITIONS);
+    }
+
+    private function isVariable(Token $token): bool
+    {
+        return $token->getName() == 'T_VARIABLE';
     }
 }
